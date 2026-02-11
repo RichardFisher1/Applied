@@ -1,4 +1,3 @@
-```md
 # Applied Bioinformatics Case Study
 
 This repository contains the code, data processing pipeline, and
