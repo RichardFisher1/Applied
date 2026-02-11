@@ -2,6 +2,8 @@
 data_processing.py
 ===================
 
+TEMPLATE - WILL UPDATE WITH ARE OWN WORK
+
 This module contains functions for loading and preprocessing the
 biotechnological process data provided for the case study. The raw
 datasets consist of two separate files:
@@ -19,29 +21,6 @@ The goal of preprocessing is to compute a set of summary statistics
 per batch that can be used as features for downstream machine
 learning models. We also compute a target variable – the product
 rate – as instructed in the coursework specification:
-
-``Product rate (kg/hr) = mean(product concentration in g/L)
-                         × mean(total liquid inflow in L/hr)
-                         × 0.001``
-
-The helper functions in this module perform the following tasks:
-
-* ``load_operating_data`` – reads the CSV file, drops the unit
-  rows, coerces numeric columns and returns a clean DataFrame.
-* ``load_product_data`` – reads the Excel file, drops the unit rows,
-  coerces the product column to numeric and returns a DataFrame.
-* ``summarise_batches`` – computes summary statistics (mean and
-  standard deviation) for each process variable within each batch.
-  The result is a feature matrix indexed by batch.
-* ``compute_product_rate`` – computes the mean product concentration
-  and mean total inflow per batch and derives the product rate.
-* ``build_features_and_target`` – orchestrates the above to
-  assemble a single DataFrame containing both the summarised
-  features and the product rate target.
-
-These functions are designed to be general and can be extended
-easily. Additional statistics (e.g., median, min, max) can be
-incorporated into ``summarise_batches`` if needed.
 
 Author: Applied Bioinformatics case study team, 2026
 """
