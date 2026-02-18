@@ -60,8 +60,210 @@ class ModelResult:
     mean_rmse: float
     std_rmse: float
 
+import numpy as np
+import pandas as pd
 
-def evaluate_model(
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import LeaveOneOut, cross_val_score, cross_val_predict
+from sklearn.metrics import r2_score, mean_squared_error
+
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.ensemble import RandomForestRegressor
+
+def bootstrap_r2(y_true, y_pred, n_bootstrap=1000, random_state=42):
+    rng = np.random.default_rng(random_state)
+    n = len(y_true)
+
+    boot_scores = []
+
+    for _ in range(n_bootstrap):
+        idx = rng.integers(0, n, n)
+        r2_sample = r2_score(y_true.iloc[idx], y_pred[idx])
+        boot_scores.append(r2_sample)
+
+    boot_scores = np.array(boot_scores)
+
+    return (
+        boot_scores.mean(),
+        boot_scores.std(),
+        np.percentile(boot_scores, 2.5),
+        np.percentile(boot_scores, 97.5),
+    )
+
+
+def evaluate_models(X, y, n_bootstrap=1000):
+
+    # ----------------------------
+    # Align & clean
+    # ----------------------------
+    y = y.reindex(X.index)
+
+    mask = y.notna()
+    X_model = X.loc[mask]
+    y_model = y.loc[mask]
+
+    # ----------------------------
+    # Define models
+    # ----------------------------
+    models = {
+        "Linear Regression": LinearRegression(),
+        "Ridge": Ridge(alpha=1.0),
+        "PLS (2 comps)": PLSRegression(n_components=2),
+        "Random Forest": RandomForestRegressor(
+            n_estimators=500,
+            max_depth=None,
+            min_samples_leaf=2,
+            random_state=42
+        )
+    }
+
+    loo = LeaveOneOut()
+    results = []
+
+    # ----------------------------
+    # Evaluation loop
+    # ----------------------------
+    for name, model in models.items():
+
+        pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("model", model)
+        ])
+
+        # MAE
+        scores_mae = cross_val_score(
+            pipe,
+            X_model,
+            y_model,
+            cv=loo,
+            scoring="neg_mean_absolute_error"
+        )
+
+        mae = -scores_mae.mean()
+
+        # LOOCV predictions
+        preds = cross_val_predict(pipe, X_model, y_model, cv=loo)
+
+        r2 = r2_score(y_model, preds)
+        rmse = np.sqrt(mean_squared_error(y_model, preds))
+
+        # ----------------------------
+        # Bootstrap R²
+        # ----------------------------
+        boot_mean, boot_std, ci_low, ci_high = bootstrap_r2(
+            y_model, preds, n_bootstrap=n_bootstrap
+        )
+
+        results.append({
+            "Model": name,
+            "MAE": mae,
+            "RMSE": rmse,
+            "R²": r2,
+            "Relative MAE (%)": 100 * mae / y_model.mean(),
+            "Bootstrap R² Mean": boot_mean,
+            "Bootstrap R² Std": boot_std,
+            "R² 95% CI Lower": ci_low,
+            "R² 95% CI Upper": ci_high
+        })
+
+    results_df = pd.DataFrame(results).sort_values("R²", ascending=False)
+
+    print("\nModel Comparison:")
+    print(results_df.to_string(index=False))
+
+    return results_df
+
+
+
+
+
+
+def evaluate_models3(X, y):
+
+    # ----------------------------
+    # Align & clean
+    # ----------------------------
+    y = y.reindex(X.index)
+
+    mask = y.notna()
+    X_model = X.loc[mask]
+    y_model = y.loc[mask]
+
+    print("Number of batches:", len(y_model))
+    print("Mean productivity:", y_model.mean())
+    print("Std productivity:", y_model.std())
+
+    # ----------------------------
+    # Define models
+    # ----------------------------
+    models = {
+        "Linear Regression": LinearRegression(),
+        "Ridge": Ridge(alpha=1.0),
+        "PLS (2 comps)": PLSRegression(n_components=2),
+        "Random Forest": RandomForestRegressor(
+            n_estimators=500,
+            max_depth=None,
+            min_samples_leaf=2,
+            random_state=42
+        )
+    }
+
+    loo = LeaveOneOut()
+    results = []
+
+    # ----------------------------
+    # Evaluation loop
+    # ----------------------------
+    for name, model in models.items():
+
+        pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("model", model)
+        ])
+
+        # MAE
+        scores_mae = cross_val_score(
+            pipe,
+            X_model,
+            y_model,
+            cv=loo,
+            scoring="neg_mean_absolute_error"
+        )
+
+        mae = -scores_mae.mean()
+
+        # R² and RMSE
+        preds = cross_val_predict(pipe, X_model, y_model, cv=loo)
+
+        r2 = r2_score(y_model, preds)
+        rmse = np.sqrt(mean_squared_error(y_model, preds))
+
+        results.append({
+            "Model": name,
+            "MAE": mae,
+            "RMSE": rmse,
+            "R²": r2,
+            "Relative MAE (%)": 100 * mae / y_model.mean()
+        })
+
+    results_df = pd.DataFrame(results).sort_values("R²", ascending=False)
+
+    print("\nModel Comparison:")
+    print(results_df.to_string(index=False))
+
+    return results_df
+
+
+
+
+
+
+def evaluate_model1(
     model, X: pd.DataFrame, y: pd.Series, cv: int = 5
 ) -> ModelResult:
     """Evaluate a regression model via cross‑validation.
