@@ -236,13 +236,8 @@ def prepare_operating_timeseries(
             medium_cutoff=medium_cutoff,
         )
 
-    # --------------------------------------------------
-    # Optional signal aggregation (row-wise)
-    # --------------------------------------------------
-    if aggregate:
-        df = aggregate_operating_timeseries(df).reset_index()
-    else:
-        df = df.sort_values(["Batch", "Date and time"])
+   
+    df = df.sort_values(["Batch", "Date and time"])
 
     # --------------------------------------------------
     # Build MultiIndex FIRST (required for resampling)
@@ -267,6 +262,11 @@ def prepare_operating_timeseries(
             rule=resample_rule,
             how=resample_how,
         )
+
+    df = df.reset_index()
+
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.fillna(0)
 
     return df
 
