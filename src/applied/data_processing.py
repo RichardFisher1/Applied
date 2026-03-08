@@ -18,8 +18,11 @@ from __future__ import annotations
 
 from typing import Tuple
 import pandas as pd
-import numpy as np
 
+
+# ==========================================================
+# Data Loading
+# ==========================================================
 
 def load_operating_data(csv_path: str) -> pd.DataFrame:
     """Load and clean operating data CSV."""
@@ -55,47 +58,9 @@ def load_product_data(xlsx_path: str) -> pd.DataFrame:
 
     return df
 
-def compute_product_rate(
-    op_df: pd.DataFrame,
-    prod_df: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Compute product rate per batch.
-
-    Product Rate (kg/hr) =
-        mean(Product [g/L]) *
-        mean(TOTAL_LIQUID_INFLOW [L/hr]) *
-        0.001
-    """
-
-    op_df = op_df.copy()
-
-    # Ensure total liquid inflow exists
-    if "TOTAL_LIQUID_INFLOW" not in op_df.columns:
-        liquid_cols = [c for c in op_df.columns if c.startswith("LIQUID")]
-        op_df["TOTAL_LIQUID_INFLOW"] = op_df[liquid_cols].sum(axis=1)
-
-    mean_product = (
-        prod_df.groupby("Batch")["Product"]
-        .mean()
-        .rename("mean_product")
-    )
-
-    mean_inflow = (
-        op_df.groupby("Batch")["TOTAL_LIQUID_INFLOW"]
-        .mean()
-        .rename("mean_inflow")
-    )
-
-    rate_df = pd.concat([mean_product, mean_inflow], axis=1).dropna()
-
-    rate_df["product_rate"] = (
-        rate_df["mean_product"] *
-        rate_df["mean_inflow"] *
-        0.001
-    )
-
-    return rate_df.reset_index()[["Batch", "product_rate"]]
+# ==========================================================
+# Productivity Ranking Utilities
+# ==========================================================
 
 def add_productivity_rank_and_tier(
     df: pd.DataFrame,
@@ -138,6 +103,10 @@ def add_productivity_rank_and_tier(
 
     return df
 
+# ==========================================================
+# Time Resampling Utilities
+# ==========================================================
+
 def resample_operating_timeseries(
     df: pd.DataFrame,
     rule: str = "1h",
@@ -170,47 +139,10 @@ def resample_operating_timeseries(
 
     return result.sort_index()
 
-def aggregate_operating_timeseries(
-    df: pd.DataFrame,
-    drop_components: bool = True
-) -> pd.DataFrame:
-    """
-    Aggregate sensor streams into grouped signals
-    while preserving full time-series structure.
-    """
 
-    df = df.copy()
-
-    # Ensure sorted
-    df = df.sort_values(["Batch", "Date and time"])
-
-    # Identify column groups
-    liquid_cols = [c for c in df.columns if c.startswith("LIQUID")]
-    gas_cols = [c for c in df.columns if c.startswith("GAS")]
-    offgas_cols = [c for c in df.columns if c.startswith("OFFGAS")]
-    pressure_cols = [c for c in df.columns if c.startswith("PRESSURE")]
-
-    # Aggregate across columns (row-wise, no time aggregation)
-    if liquid_cols:
-        df["TOTAL_LIQUID_INFLOW"] = df[liquid_cols].sum(axis=1)
-
-    if gas_cols:
-        df["TOTAL_GAS_INFLOW"] = df[gas_cols].sum(axis=1)
-
-    if offgas_cols:
-        df["MEAN_OFFGAS"] = df[offgas_cols].mean(axis=1)
-
-    if pressure_cols:
-        df["MEAN_PRESSURE"] = df[pressure_cols].mean(axis=1)
-
-    if drop_components:
-        df = df.drop(
-            columns=liquid_cols + gas_cols + offgas_cols + pressure_cols,
-            errors="ignore"
-        )
-
-    # Return structured multi-index time-series
-    return df.set_index(["Batch", "Date and time"])
+# ==========================================================
+# Operating Data Structuring Pipeline
+# ==========================================================
 
 def prepare_operating_timeseries(
     df: pd.DataFrame,
@@ -236,8 +168,13 @@ def prepare_operating_timeseries(
             medium_cutoff=medium_cutoff,
         )
 
-   
-    df = df.sort_values(["Batch", "Date and time"])
+    # --------------------------------------------------
+    # Optional signal aggregation (row-wise)
+    # --------------------------------------------------
+    if aggregate:
+        df = aggregate_operating_timeseries(df).reset_index()
+    else:
+        df = df.sort_values(["Batch", "Date and time"])
 
     # --------------------------------------------------
     # Build MultiIndex FIRST (required for resampling)
@@ -263,12 +200,9 @@ def prepare_operating_timeseries(
             how=resample_how,
         )
 
-    df = df.reset_index()
-
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.fillna(0)
-
     return df
+
+
 
 def batch_time_diagnostics(df):
 
@@ -352,6 +286,124 @@ def batch_time_diagnostics(df):
 
     return result
 
+
+# ==========================================================
+# Feature Engineering
+# ==========================================================
+
+def engineer_operating_totals(df: pd.DataFrame) -> pd.DataFrame:
+    """Create engineered total operating variables."""
+    df = df.copy()
+
+    liquid_cols = [c for c in df.columns if c.startswith("LIQUID")]
+    gas_cols = [c for c in df.columns if c.startswith("GAS")]
+    offgas_cols = [c for c in df.columns if c.startswith("OFFGAS")]
+    pressure_cols = [c for c in df.columns if c.startswith("PRESSURE")]
+
+    if liquid_cols:
+        df["TOTAL_LIQUID_INFLOW"] = df[liquid_cols].sum(axis=1)
+
+    if gas_cols:
+        df["TOTAL_GAS_INFLOW"] = df[gas_cols].sum(axis=1)
+
+    if offgas_cols:
+        df["TOTAL_OFFGAS"] = df[offgas_cols].mean(axis=1)
+
+    if pressure_cols:
+        df["MEAN_PRESSURE"] = df[pressure_cols].mean(axis=1)
+
+    # Drop original component columns
+    df = df.drop(columns=liquid_cols + gas_cols + offgas_cols + pressure_cols)
+
+    return df
+
+
+def summarise_batches(
+    df: pd.DataFrame,
+    stats: Tuple[str, ...] = ("mean",)
+) -> pd.DataFrame:
+    """Compute batch-level summary statistics."""
+    measurement_cols = [c for c in df.columns if c not in ("Date and time", "Batch")]
+
+    grouped = df.groupby("Batch")[measurement_cols]
+    summary = grouped.agg(list(stats))
+
+    summary.columns = [f"{var}_{stat}" for var, stat in summary.columns]
+
+    return summary.reset_index()
+
+
+# ==========================================================
+# Target Computation
+# ==========================================================
+
+def compute_product_rate(
+    op_df: pd.DataFrame,
+    prod_df: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Compute product rate per batch.
+
+    Product Rate (kg/hr) =
+        mean(Product [g/L]) *
+        mean(TOTAL_LIQUID_INFLOW [L/hr]) *
+        0.001
+    """
+
+    op_df = op_df.copy()
+
+    # Ensure total liquid inflow exists
+    if "TOTAL_LIQUID_INFLOW" not in op_df.columns:
+        liquid_cols = [c for c in op_df.columns if c.startswith("LIQUID")]
+        op_df["TOTAL_LIQUID_INFLOW"] = op_df[liquid_cols].sum(axis=1)
+
+    mean_product = (
+        prod_df.groupby("Batch")["Product"]
+        .mean()
+        .rename("mean_product")
+    )
+
+    mean_inflow = (
+        op_df.groupby("Batch")["TOTAL_LIQUID_INFLOW"]
+        .mean()
+        .rename("mean_inflow")
+    )
+
+    rate_df = pd.concat([mean_product, mean_inflow], axis=1).dropna()
+
+    rate_df["product_rate"] = (
+        rate_df["mean_product"] *
+        rate_df["mean_inflow"] *
+        0.001
+    )
+
+    return rate_df.reset_index()[["Batch", "product_rate"]]
+
+def summarise_last_phase(
+    df: pd.DataFrame,
+    fraction: float = 0.2
+) -> pd.DataFrame:
+    """
+    Compute summary statistics over the last fraction of each batch.
+    """
+
+    results = []
+
+    for batch, group in df.groupby("Batch"):
+        group = group.sort_values("Date and time")
+        cutoff = int(len(group) * (1 - fraction))
+        late = group.iloc[cutoff:]
+
+        summary = late.mean(numeric_only=True)
+        summary["Batch"] = batch
+        results.append(summary)
+
+    late_df = pd.DataFrame(results)
+    return late_df
+
+
+import numpy as np
+
 def compute_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute linear trend (slope) for each variable within each batch.
@@ -379,6 +431,7 @@ def compute_trend_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(results)
 
+
 def compute_range_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute max-min range per batch for each variable.
@@ -397,211 +450,48 @@ def compute_range_features(df: pd.DataFrame) -> pd.DataFrame:
     return range_df.reset_index()
 
 
-import numpy as np
-import pandas as pd
-
-
-import numpy as np
-
-
-# ======================================================
-# Utility
-# ======================================================
-
-def clean_signal(batch_df, column):
-    df = batch_df.sort_values("relative_step")
-
-    s = df[column].astype(float)
-    t = df["relative_step"].astype(float)
-
-    mask = (~s.isna()) & (~t.isna())
-
-    return s[mask].values, t[mask].values
-
-
-def encode_generic_signal(batch_df, column, prefix):
+def aggregate_operating_timeseries(
+    df: pd.DataFrame,
+    drop_components: bool = True
+) -> pd.DataFrame:
     """
-    Generic encoder for signals:
-    - mean
-    - slope
-    - diff std
+    Aggregate sensor streams into grouped signals
+    while preserving full time-series structure.
     """
 
-    s, t = clean_signal(batch_df, column)
+    df = df.copy()
 
-    # Require minimum length
-    if len(s) < 3:
-        return {
-            f"{prefix}_mean": np.nan,
-            f"{prefix}_slope": np.nan,
-            f"{prefix}_diff_std": np.nan,
-        }
+    # Ensure sorted
+    df = df.sort_values(["Batch", "Date and time"])
 
-    diff = np.diff(s)
+    # Identify column groups
+    liquid_cols = [c for c in df.columns if c.startswith("LIQUID")]
+    gas_cols = [c for c in df.columns if c.startswith("GAS")]
+    offgas_cols = [c for c in df.columns if c.startswith("OFFGAS")]
+    pressure_cols = [c for c in df.columns if c.startswith("PRESSURE")]
 
-    # Safe slope computation
-    try:
-        slope = np.polyfit(t, s, 1)[0]
-    except Exception:
-        slope = np.nan
+    # Aggregate across columns (row-wise, no time aggregation)
+    if liquid_cols:
+        df["TOTAL_LIQUID_INFLOW"] = df[liquid_cols].sum(axis=1)
 
-    return {
-        f"{prefix}_mean": np.mean(s),
-        f"{prefix}_slope": slope,
-        f"{prefix}_diff_std": np.std(diff),
-    }
+    if gas_cols:
+        df["TOTAL_GAS_INFLOW"] = df[gas_cols].sum(axis=1)
 
+    if offgas_cols:
+        df["MEAN_OFFGAS"] = df[offgas_cols].mean(axis=1)
 
-# ======================================================
-# Signal Encoders
-# ======================================================
-import numpy as np
+    if pressure_cols:
+        df["MEAN_PRESSURE"] = df[pressure_cols].mean(axis=1)
 
+    if drop_components:
+        df = df.drop(
+            columns=liquid_cols + gas_cols + offgas_cols + pressure_cols,
+            errors="ignore"
+        )
 
-# ======================================================
-# Utility
-# ======================================================
+    # Return structured multi-index time-series
+    return df.set_index(["Batch", "Date and time"])
 
-def clean_signal(batch_df, column):
-    df = batch_df.sort_values("relative_step")
-
-    s = df[column].astype(float)
-    t = df["relative_step"].astype(float)
-
-    mask = (~s.isna()) & (~t.isna())
-
-    return s[mask].values, t[mask].values
-
-
-def encode_generic_signal(batch_df, column, prefix):
-
-    s, t = clean_signal(batch_df, column)
-
-    if len(s) < 5:
-        return {
-            f"{prefix}_mean": np.nan,
-            f"{prefix}_std": np.nan,
-            f"{prefix}_slope": np.nan,
-            f"{prefix}_early_mean": np.nan,
-            f"{prefix}_late_mean": np.nan,
-            f"{prefix}_range": np.nan,
-            f"{prefix}_auc": np.nan,
-            f"{prefix}_time_to_max": np.nan,
-            f"{prefix}_high_fraction": np.nan,
-        }
-
-    n = len(s)
-    early_cut = int(n * 0.2)
-    late_cut = int(n * 0.8)
-
-    early_s = s[:early_cut]
-    late_s = s[late_cut:]
-
-    try:
-        slope = np.polyfit(t, s, 1)[0]
-    except:
-        slope = np.nan
-
-    # normalized time to max (0–1)
-    time_to_max = np.argmax(s) / n
-
-    # high regime persistence (top quartile)
-    high_threshold = np.percentile(s, 75)
-    high_fraction = np.mean(s > high_threshold)
-
-    return {
-        f"{prefix}_mean": np.mean(s),
-        f"{prefix}_std": np.std(s),
-        f"{prefix}_slope": slope,
-        f"{prefix}_early_mean": np.mean(early_s),
-        f"{prefix}_late_mean": np.mean(late_s),
-        f"{prefix}_range": np.max(s) - np.min(s),
-        f"{prefix}_auc": np.trapezoid(s, t),
-        f"{prefix}_time_to_max": time_to_max,
-        f"{prefix}_high_fraction": high_fraction,
-    }
-
-# ======================================================
-# Signal Wrappers
-# ======================================================
-
-def encode_total_liquid_inflow(batch_df):
-    return encode_generic_signal(batch_df, "TOTAL_LIQUID_INFLOW", "liquid")
-
-
-def encode_oxygen(batch_df):
-    return encode_generic_signal(batch_df, "OXYGEN", "oxy")
-
-
-def encode_total_gas_inflow(batch_df):
-    return encode_generic_signal(batch_df, "TOTAL_GAS_INFLOW", "gas")
-
-
-def encode_mean_offgas(batch_df):
-    return encode_generic_signal(batch_df, "MEAN_OFFGAS", "offgas")
-
-
-def encode_mean_pressure(batch_df):
-    return encode_generic_signal(batch_df, "MEAN_PRESSURE", "pressure")
-
-
-def encode_pH(batch_df):
-
-    s, t = clean_signal(batch_df, "pH")
-
-    if len(s) < 5:
-        return {
-            "ph_mean_abs_dev": np.nan,
-            "ph_early_mean": np.nan,
-            "ph_late_mean": np.nan,
-            "ph_slope": np.nan,
-            "ph_diff_std": np.nan,
-            "ph_range": np.nan,
-            "ph_time_out_of_band": np.nan,
-        }
-
-    n = len(s)
-    early_cut = int(n * 0.2)
-    late_cut = int(n * 0.8)
-
-    early_s = s[:early_cut]
-    late_s = s[late_cut:]
-
-    deviation = s - np.mean(s)
-    diff = np.diff(s)
-
-    try:
-        slope = np.polyfit(t, s, 1)[0]
-    except:
-        slope = np.nan
-
-    # fraction outside tight band (control quality)
-    tolerance = 0.1
-    out_of_band = np.mean(np.abs(deviation) > tolerance)
-
-    return {
-        "ph_mean_abs_dev": np.mean(np.abs(deviation)),
-        "ph_early_mean": np.mean(early_s),
-        "ph_late_mean": np.mean(late_s),
-        "ph_slope": slope,
-        "ph_diff_std": np.std(diff),
-        "ph_range": np.max(s) - np.min(s),
-        "ph_time_out_of_band": out_of_band,
-    }
-
-
-# --------------------------------------------------
-# Encoder Registry (Modular)
-# --------------------------------------------------
-
-ENCODERS = [
-    encode_total_liquid_inflow,
-    encode_pH,
-    encode_oxygen,
-    encode_total_gas_inflow,
-    encode_mean_offgas,
-    encode_mean_pressure,
-]
 
 
 
@@ -610,82 +500,62 @@ ENCODERS = [
 # ==========================================================
 # Full Pipeline
 # ==========================================================
-
 def build_features_and_target(
     op_df: pd.DataFrame,
     prod_df: pd.DataFrame,
-    resample_rule: str = "1h",
+    stats: Tuple[str, ...] = ("mean",),
+    use_engineered_totals: bool = False,
+    include_last_phase: bool = False,
+    include_trends: bool = False,
+    include_ranges: bool = False,
 ) -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    Full modular feature engineering pipeline.
 
-    Steps:
-        1. Prepare operating timeseries
-        2. Resample
-        3. Add relative_step
-        4. Encode signals per batch
-        5. Compute product_rate
-        6. Return X, y
-    """
+    op_df = op_df.copy()
+
+    # Optional engineered totals (normally OFF for independent sensors)
+    if use_engineered_totals:
+        op_df = engineer_operating_totals(op_df)
 
     # --------------------------------------------------
-    # 1️⃣ Prepare & Resample Operating Data
+    # Base batch summary features
     # --------------------------------------------------
-    op_df = prepare_operating_timeseries(
-        op_df,
-        add_rank=True,
-        add_tier=False,
-        aggregate=True,
-        resample_rule=resample_rule,
-    )
-
-    # flatten index for processing
-    op_df = op_df.reset_index()
+    summary_df = summarise_batches(op_df, stats=stats)
+    feature_df = summary_df
 
     # --------------------------------------------------
-    # 2️⃣ Add Relative Time Index
+    # Late phase features
     # --------------------------------------------------
-    op_df = op_df.sort_values(["Batch", "Date and time"])
-
-    op_df["relative_step"] = (
-        op_df.groupby("Batch")
-        .cumcount()
-    )
-
-    # --------------------------------------------------
-    # 3️⃣ Encode Per Batch
-    # --------------------------------------------------
-    feature_rows = []
-
-    for batch_id, batch_df in op_df.groupby("Batch"):
-
-        row = {}
-
-        for encoder in ENCODERS:
-            row.update(encoder(batch_df))
-
-        row["Batch"] = batch_id
-
-        feature_rows.append(row)
-
-    feature_df = pd.DataFrame(feature_rows)
+    if include_last_phase:
+        late_df = summarise_last_phase(op_df)
+        late_df = late_df.add_suffix("_late")
+        late_df = late_df.rename(columns={"Batch_late": "Batch"})
+        feature_df = feature_df.merge(late_df, on="Batch", how="left")
 
     # --------------------------------------------------
-    # 4️⃣ Compute Target
+    # Trend features
     # --------------------------------------------------
-    rate_df = compute_product_rate(
-        op_df[["Batch", "TOTAL_LIQUID_INFLOW"]],
-        prod_df
-    )
+    if include_trends:
+        trend_df = compute_trend_features(op_df)
+        feature_df = feature_df.merge(trend_df, on="Batch", how="left")
 
     # --------------------------------------------------
-    # 5️⃣ Merge Features & Target
+    # Range features
     # --------------------------------------------------
-    merged = feature_df.merge(rate_df, on="Batch", how="inner")
+    if include_ranges:
+        range_df = compute_range_features(op_df)
+        feature_df = feature_df.merge(range_df, on="Batch", how="left")
 
-    X = merged.drop(columns=["product_rate"]).set_index("Batch")
-    y = merged.set_index("Batch")["product_rate"]
+    # --------------------------------------------------
+    # Target variable
+    # --------------------------------------------------
+    rate_df = compute_product_rate(op_df, prod_df)
 
-    return X, y
+    # --------------------------------------------------
+    # Merge features and target
+    # --------------------------------------------------
+    merged = feature_df.merge(rate_df, on="Batch", how="left")
 
+    features = merged.drop(columns=["product_rate"]).set_index("Batch")
+    target = merged.set_index("Batch")["product_rate"]
 
+    return features, target
