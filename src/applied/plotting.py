@@ -1,9 +1,13 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import math
+
 
 class BatchTimeSeriesPlotter:
 
     def __init__(self, df, time_col="Date and time", batch_col="Batch"):
-        import pandas as pd
-
+        
         self.df = df.copy()
         self.time_col = time_col
         self.batch_col = batch_col
@@ -11,7 +15,6 @@ class BatchTimeSeriesPlotter:
         self.df[time_col] = pd.to_datetime(self.df[time_col])
 
     def _prepare_batch(self, batch, freq):
-        import pandas as pd
 
         df_batch = self.df[self.df[self.batch_col] == batch].copy()
 
@@ -49,9 +52,6 @@ class BatchTimeSeriesPlotter:
         return df_batch, duplicate_times, missing_timestamps
 
     def plot(self, batch=None, column=None, columns=None, batches=None, freq="15min", width=None):
-        import matplotlib.pyplot as plt
-        import math
-        import numpy as np
 
         if batch is not None and column is not None:
             columns = column
@@ -197,8 +197,6 @@ class BatchTimeSeriesPlotter:
             raise ValueError("Provide either batch=... or column=...")
 
     def plot_batches_grid(self, columns, batches=None, freq="15min"):
-        import matplotlib.pyplot as plt
-        import numpy as np
 
         if isinstance(columns, str):
             columns = [columns]
@@ -267,8 +265,6 @@ class BatchTimeSeriesPlotter:
         plt.show()
 
     def plot_overlay(self, column, batches=None, freq="15min", normalize_time=True):
-        import matplotlib.pyplot as plt
-        import numpy as np
 
         if batches is None:
             batches = sorted(self.df[self.batch_col].dropna().unique())
