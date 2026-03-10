@@ -3,6 +3,9 @@ import numpy as np
 import pandas as pd
 import math
 
+from mpl_toolkits.mplot3d import Axes3D
+
+
 
 class BatchTimeSeriesPlotter:
 
@@ -204,6 +207,9 @@ class BatchTimeSeriesPlotter:
         if batches is None:
             batches = sorted(self.df[self.batch_col].dropna().unique())
 
+        if isinstance(batches, (int, float)):
+            batches = [batches]
+
         nrows = len(columns)
         ncols = len(batches)
 
@@ -214,7 +220,7 @@ class BatchTimeSeriesPlotter:
             sharex=False
         )
 
-        axes = np.atleast_2d(axes)
+        axes = np.array(axes).reshape(nrows, ncols)
 
         for col_i, col in enumerate(columns):
 
@@ -320,4 +326,61 @@ class BatchTimeSeriesPlotter:
         plt.tight_layout()
         plt.show()
 
-        
+    def plot_batch_3d(self, batch, columns, freq="15min", normalize_time=True):
+
+        if isinstance(columns, str):
+            columns = [columns]
+
+        df_batch, duplicate_times, missing_timestamps = self._prepare_batch(batch, freq)
+
+        if df_batch is None or df_batch.empty:
+            print("No data for batch")
+            return
+
+        fig = plt.figure(figsize=(10,6))
+        ax = fig.add_subplot(111, projection='3d')
+
+        for i, col in enumerate(columns):
+
+            if col not in df_batch.columns:
+                continue
+
+            series = df_batch[col].dropna()
+
+            if series.empty:
+                continue
+
+            # X axis
+            if normalize_time:
+                x = np.linspace(0,1,len(series))
+            else:
+                x = series.index
+
+            # Y axis = variable index
+            y = np.full(len(series), i)
+
+            # Z axis = value
+            z = series.values
+
+            ax.plot(x, y, z, linewidth=2)
+
+        ax.set_yticks(range(len(columns)))
+        ax.set_yticklabels(columns)
+
+        if normalize_time:
+            ax.set_xlabel("Normalized Batch Progress")
+        else:
+            ax.set_xlabel("Time")
+
+        ax.set_ylabel("Variable")
+        ax.set_zlabel("Value")
+
+        ax.set_title(f"Batch {batch} 3D Trajectory")
+
+        plt.tight_layout()
+        plt.show()      
+
+
+        from mpl_toolkits.mplot3d import Axes3D
+
+    
