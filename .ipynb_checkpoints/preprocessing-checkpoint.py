@@ -19,10 +19,12 @@ def preprocessing_operating_data():
     df_op['Date and time'] = pd.to_datetime(df_op['Date and time'], dayfirst=True)
 
     liquid_cols = [col for col in df_op.columns if 'LIQUID INFLOW' in col]
-
     df_op[liquid_cols] = df_op[liquid_cols].apply(pd.to_numeric, errors='coerce')
 
-    df_op['TOTAL LIQUID INFLOW'] = df_op[liquid_cols].sum(axis=1)
+    gas_cols = [col for col in df_op.columns if 'GAS INFLOW' in col]
+    df_op[gas_cols] = df_op[gas_cols].apply(pd.to_numeric, errors='coerce')
+    
+    df_op['TOTAL LIQUID INFLOW'] = df_op[liquid_cols].sum(axis=1).round(2)
     
     return df_op
 
@@ -73,8 +75,10 @@ def add_product_to_operating(df_op, df_p):
     
             diff_minutes = abs((op_times[i] - p_times[j]) / np.timedelta64(1, 'm'))
     
-            if diff_minutes == 1:
+            if diff_minutes <= 5:
                 df_op.iat[i, df_op.columns.get_loc('Product (g/litre)')] = p_values[j]
                 break
 
     return df_op
+
+    #https://towardsdatascience.com/how-to-forecast-time-series-using-lags-5876e3f7f473/
