@@ -214,12 +214,6 @@ class BatchTimeSeriesInspector:
         return pd.DataFrame(data)
 
 
-
-
-
-
-
-
 # ==========================================================
 # Data Loading
 # ==========================================================
@@ -401,7 +395,6 @@ def prepare_operating_timeseries(
         )
 
     return df
-
 
 
 def batch_time_diagnostics(df):
@@ -691,10 +684,6 @@ def aggregate_operating_timeseries(
 
     # Return structured multi-index time-series
     return df.set_index(["Batch", "Date and time"])
-
-
-
-
 
 
 # ==========================================================

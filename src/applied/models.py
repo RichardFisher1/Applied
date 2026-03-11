@@ -93,6 +93,106 @@ def bootstrap_r2(y_true, y_pred, n_bootstrap=1000, random_state=42):
         np.percentile(boot_scores, 97.5),
     )
 
+def correlation_report(X, y=None, threshold=0.75, mode="both"):
+    """
+    Correlation diagnostics.
+
+    Parameters
+    ----------
+    X : pandas.DataFrame
+        Feature matrix
+    y : pandas.Series or array-like, optional
+        Target variable
+    threshold : float
+        Minimum absolute correlation to report
+    mode : {"feature", "target", "duplicates", "both"}
+        feature     → X vs X correlations
+        target      → X vs y correlations
+        duplicates  → duplicate feature detection
+        both        → feature + target correlations
+
+    Returns
+    -------
+    Depending on mode:
+        feature_corr_df
+        target_corr_df
+        duplicate_features
+    """
+
+    import numpy as np
+    import pandas as pd
+
+    X = X.copy()
+
+    feature_corr_df = None
+    target_corr_df = None
+    duplicate_features = None
+
+    # -----------------------------
+    # Duplicate features
+    # -----------------------------
+    if mode in ["duplicates", "both"]:
+        duplicate_cols = X.T.duplicated()
+        duplicate_features = X.columns[duplicate_cols].tolist()
+
+    # -----------------------------
+    # Feature vs Feature
+    # -----------------------------
+    if mode in ["feature", "both"]:
+
+        corr_matrix = X.corr().abs()
+
+        upper_triangle = corr_matrix.where(
+            np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+        )
+
+        feature_pairs = [
+            (idx, col, upper_triangle.loc[idx, col])
+            for col in upper_triangle.columns
+            for idx in upper_triangle.index
+            if upper_triangle.loc[idx, col] > threshold
+        ]
+
+        feature_corr_df = (
+            pd.DataFrame(feature_pairs, columns=["Feature_1", "Feature_2", "Correlation"])
+            .sort_values("Correlation", ascending=False)
+            .reset_index(drop=True)
+        )
+
+    # -----------------------------
+    # Feature vs Target
+    # -----------------------------
+    if y is not None and mode in ["target", "both"]:
+
+        target_corr = X.corrwith(y).abs()
+
+        target_corr_df = (
+            target_corr[target_corr > threshold]
+            .sort_values(ascending=False)
+            .reset_index()
+        )
+
+        target_corr_df.columns = ["Feature", "Correlation_with_Target"]
+
+    # -----------------------------
+    # Return depending on mode
+    # -----------------------------
+    if mode == "feature":
+        return feature_corr_df
+
+    if mode == "target":
+        return target_corr_df
+
+    if mode == "duplicates":
+        return duplicate_features
+
+    return feature_corr_df, target_corr_df, duplicate_features
+
+
+
+
+
+
 
 def evaluate_models(X, y, n_bootstrap=1000):
 
@@ -177,11 +277,6 @@ def evaluate_models(X, y, n_bootstrap=1000):
 
     return results_df
 
-
-
-
-
-
 def evaluate_models3(X, y):
 
     # ----------------------------
@@ -258,11 +353,6 @@ def evaluate_models3(X, y):
 
     return results_df
 
-
-
-
-
-
 def evaluate_model1(
     model, X: pd.DataFrame, y: pd.Series, cv: int = 5
 ) -> ModelResult:
@@ -302,7 +392,6 @@ def evaluate_model1(
         mean_rmse=np.mean(rmse_scores),
         std_rmse=np.std(rmse_scores),
     )
-
 
 def get_models(n_estimators: int = 500, random_state: int = 42) -> Dict[str, object]:
     """Construct a dictionary of candidate regression models.
@@ -351,7 +440,6 @@ def get_models(n_estimators: int = 500, random_state: int = 42) -> Dict[str, obj
     ])
     return models
 
-
 def run_experiments(
     X: pd.DataFrame, y: pd.Series, cv: int = 5
 ) -> List[ModelResult]:
@@ -378,7 +466,6 @@ def run_experiments(
         res.name = name
         results.append(res)
     return results
-
 
 def compute_feature_importances(
     rf_model: RandomForestRegressor, feature_names: List[str]
@@ -408,7 +495,6 @@ def compute_feature_importances(
     """
     importances = rf_model.feature_importances_
     return pd.Series(importances, index=feature_names).sort_values(ascending=False)
-
 
 def predict_missing_batch(
     X: pd.DataFrame,
