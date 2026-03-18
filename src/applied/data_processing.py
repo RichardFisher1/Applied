@@ -18,11 +18,12 @@ from __future__ import annotations
 
 from typing import Tuple
 import pandas as pd
+from pathlib import Path
 
 
 
 
-import pandas as pd
+
 
 class BatchTimeSeriesInspector:
 
@@ -218,51 +219,28 @@ class BatchTimeSeriesInspector:
 # Data Loading
 # ==========================================================
 
-# def load_operating_data(csv_path: str) -> pd.DataFrame:
-#     df = pd.read_csv(csv_path, low_memory=False)
+def load_operating_data(csv_path: str | Path) -> pd.DataFrame:
+    df = pd.read_csv(csv_path, skiprows=[1, 2], low_memory=False)
 
-#     # Convert datetime (invalid stays as NaT, no rows dropped)
-#     if "Date and time" in df.columns:
-#         df["Date and time"] = pd.to_datetime(
-#             df["Date and time"],
-#             format="%d/%m/%Y %H:%M",
-#             errors="coerce"
-#         )
+    df["Date and time"] = pd.to_datetime(
+        df["Date and time"],
+        format="%d/%m/%Y %H:%M",
+        errors="coerce"
+    )
 
-#     # Convert Batch to numeric (keep NaNs if they exist)
-#     if "Batch" in df.columns:
-#         df["Batch"] = pd.to_numeric(df["Batch"], errors="coerce")
+    df["Batch"] = pd.to_numeric(df["Batch"], errors="coerce").astype("Int64")
 
-#     # Convert all other columns to numeric (no filtering)
-#     numeric_cols = [c for c in df.columns if c not in ("Date and time", "Batch")]
-
-#     for col in numeric_cols:
-#         df[col] = pd.to_numeric(df[col], errors="coerce")
-
-#     return df
-
-def load_operating_data(csv_path: str) -> pd.DataFrame:
-    df = pd.read_csv(csv_path, low_memory=False)
-
-    # Convert datetime
-    if "Date and time" in df.columns:
-        df["Date and time"] = pd.to_datetime(
-            df["Date and time"],
-            format="%d/%m/%Y %H:%M",
-            errors="coerce"
-        )
-
-    # Convert Batch to INTEGER (nullable)
-    if "Batch" in df.columns:
-        df["Batch"] = pd.to_numeric(df["Batch"], errors="coerce").astype("Int64")
-
-    # Convert other columns to numeric
     numeric_cols = [c for c in df.columns if c not in ("Date and time", "Batch")]
-
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
+
+
+
+
+
+
 
 def load_product_data(xlsx_path: str) -> pd.DataFrame:
     """Load and clean product data Excel."""
