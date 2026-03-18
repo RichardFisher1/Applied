@@ -103,35 +103,35 @@ class BatchTimeSeriesInspector:
     # Inspect one batch
     # -------------------------------------------------
 
-    def inspect_batch1(self, batch):
-
-        if self.summary_df is None:
-            raise ValueError("Run summary() first.")
-
-        row = self.summary_df[self.summary_df["Batch"] == batch]
-
-        if row.empty:
-            print(f"Batch {batch} not found.")
-            return None
-
-        return row.loc[:, (row != 0).any(axis=0)]
-
-    def inspect_batch(self, batch):
+    def inspect_batch(self, batch, include_nan_cols=True):
 
         if self.summary_df is None:
             raise ValueError("Run summary() first.")
 
         # allow single batch or list
         if isinstance(batch, (list, tuple, set)):
-            rows = self.summary_df[self.summary_df["Batch"].isin(batch)]
+            rows = self.summary_df[self.summary_df["Batch"].isin(batch)].copy()
         else:
-            rows = self.summary_df[self.summary_df["Batch"] == batch]
+            rows = self.summary_df[self.summary_df["Batch"] == batch].copy()
 
         if rows.empty:
             print("Batch not found.")
             return None
 
-        return rows.loc[:, (rows != 0).any(axis=0)]
+        # --- identify nan columns ---
+        nan_cols = [c for c in rows.columns if c.startswith("nan_")]
+
+        # --- total missing ---
+        rows["total_nan"] = rows[nan_cols].sum(axis=1)
+
+        # --- optionally drop nan columns ---
+        if not include_nan_cols:
+            rows = rows.drop(columns=nan_cols)
+
+        # --- remove all-zero columns ---
+        rows = rows.loc[:, (rows != 0).any(axis=0)]
+
+        return rows
 
     # -------------------------------------------------
     # Return raw batch data
@@ -218,19 +218,45 @@ class BatchTimeSeriesInspector:
 # Data Loading
 # ==========================================================
 
+# def load_operating_data(csv_path: str) -> pd.DataFrame:
+#     df = pd.read_csv(csv_path, low_memory=False)
+
+#     # Convert datetime (invalid stays as NaT, no rows dropped)
+#     if "Date and time" in df.columns:
+#         df["Date and time"] = pd.to_datetime(
+#             df["Date and time"],
+#             format="%d/%m/%Y %H:%M",
+#             errors="coerce"
+#         )
+
+#     # Convert Batch to numeric (keep NaNs if they exist)
+#     if "Batch" in df.columns:
+#         df["Batch"] = pd.to_numeric(df["Batch"], errors="coerce")
+
+#     # Convert all other columns to numeric (no filtering)
+#     numeric_cols = [c for c in df.columns if c not in ("Date and time", "Batch")]
+
+#     for col in numeric_cols:
+#         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+#     return df
+
 def load_operating_data(csv_path: str) -> pd.DataFrame:
-    """Load and clean operating data CSV."""
     df = pd.read_csv(csv_path, low_memory=False)
 
-    df = df[df["Batch"].notna()].copy()
-
+    # Convert datetime
     if "Date and time" in df.columns:
-        df["Date and time"] = pd.to_datetime(df["Date and time"], format="%d/%m/%Y %H:%M", errors="coerce")
+        df["Date and time"] = pd.to_datetime(
+            df["Date and time"],
+            format="%d/%m/%Y %H:%M",
+            errors="coerce"
+        )
 
-    df["Batch"] = pd.to_numeric(df["Batch"], errors="coerce").astype(int)
+    # Convert Batch to INTEGER (nullable)
+    if "Batch" in df.columns:
+        df["Batch"] = pd.to_numeric(df["Batch"], errors="coerce").astype("Int64")
 
-    df = df[df["Date and time"].notna()].copy()
-
+    # Convert other columns to numeric
     numeric_cols = [c for c in df.columns if c not in ("Date and time", "Batch")]
 
     for col in numeric_cols:
